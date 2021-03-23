@@ -18,6 +18,7 @@ jobs:
           pip install .
 
       - name: Run integration tests for sklearn
+        run: |
           estimator_to_primitive integration_test/sklearn_metadata.yml
           find sklearn_wrap/tests/*.py -exec python {} \;
 

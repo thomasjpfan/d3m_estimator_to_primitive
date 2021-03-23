@@ -1,5 +1,7 @@
 # D3M Estimator to Primitive
 
+[![.github/workflows/ci.yml](https://github.com/thomasjpfan/d3m_estimator_to_primitive/actions/workflows/ci.yml/badge.svg)](https://github.com/thomasjpfan/d3m_estimator_to_primitive/actions/workflows/ci.yml)
+
 Converts sklearn compatible estimators into D3M primitives
 
 ## Installation
