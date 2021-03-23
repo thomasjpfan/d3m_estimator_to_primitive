@@ -15,7 +15,7 @@ jobs:
 
       - name: Install library
         run: |
-          pip install .
+          pip install .[dev]
 
       - name: Run integration tests for sklearn
         run: |
