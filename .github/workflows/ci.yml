@@ -24,5 +24,6 @@ jobs:
 
       - name: Run integration tests for xgboost
         run: |
+          pip install xgboost
           estimator_to_primitive integration_test/xgboost_metadata.yml
           find xgboost_wrap/tests/*.py -exec python {} \;
