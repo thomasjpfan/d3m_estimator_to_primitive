@@ -12,3 +12,13 @@ estimators:
         lower: 1
         upper: 1000
         default: 20
+  D3M_XGBRegressor:
+    class_name: xgboost.XGBRegressor
+    d3m_python_path: d3m.primitives.classification.xgboost.XGBRegressor
+    algorithm_types: [GRADIENT_BOOSTING]
+    parameters:
+      n_estimators:
+        type: int
+        lower: 1
+        upper: 1000
+        default: 20

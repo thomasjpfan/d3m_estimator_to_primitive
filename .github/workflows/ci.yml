@@ -1,0 +1,27 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v2
+
+      - name: Setup Python env
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.6"
+
+      - name: Install library
+        run: |
+          pip install .
+
+      - name: Run integration tests for sklearn
+          estimator_to_primitive integration_test/sklearn_metadata.yml
+          find sklearn_wrap/tests/*.py -exec python {} \;
+
+      - name: Run integration tests for xgboost
+        run: |
+          estimator_to_primitive integration_test/xgboost_metadata.yml
+          find xgboost_wrap/tests/*.py -exec python {} \;
