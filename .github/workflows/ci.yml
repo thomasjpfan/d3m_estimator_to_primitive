@@ -20,6 +20,7 @@ jobs:
       - name: Run integration tests for sklearn
         run: |
           estimator_to_primitive integration_test/sklearn_metadata.yml
+          echo "$PWD"
           python sklearn_wrap/tests/*.py
 
       - name: Run integration tests for xgboost

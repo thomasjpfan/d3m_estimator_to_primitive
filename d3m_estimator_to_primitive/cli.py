@@ -17,6 +17,7 @@ def _clean_and_write(path, source):
     remove_unused_imports = fix_code(source, remove_all_unused_imports=True)
     formated_python = format_str(remove_unused_imports, mode=FileMode())
     with path.open("w") as f:
+        print(f"writing to {path}")
         f.write(formated_python)
 
 
