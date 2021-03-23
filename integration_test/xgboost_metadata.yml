@@ -1,0 +1,14 @@
+package_name: xgboost_wrap
+author: Thomas J. Fan
+version: 2021.3.0
+estimators:
+  D3M_XGBClassifier:
+    class_name: xgboost.XGBClassifier
+    d3m_python_path: d3m.primitives.classification.xgboost.XGBClassifier
+    algorithm_types: [GRADIENT_BOOSTING]
+    parameters:
+      n_estimators:
+        type: int
+        lower: 1
+        upper: 1000
+        default: 20

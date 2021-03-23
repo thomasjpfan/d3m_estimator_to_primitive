@@ -1,0 +1,196 @@
+{% extends "base.jinja2" %}
+
+{% block class_inherit %}SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, Hyperparams]{% endblock %}
+
+{% block class_body %}
+    def set_training_data(self, *, inputs: Inputs, outputs: Outputs) -> None:
+        self._inputs = inputs
+        self._outputs = outputs
+        self._fitted = False
+        self._new_training_data = True
+
+    def fit(self, *, timeout: float = None, iterations: int = None) -> CallResult[None]:
+        if self._inputs is None or self._outputs is None:
+            raise ValueError("Missing training data.")
+
+        if not self._new_training_data:
+            return CallResult(None)
+        self._new_training_data = False
+
+        self._training_inputs, self._training_indices = self._get_columns_to_fit(self._inputs, self.hyperparams)
+        self._training_outputs, self._target_names, self._target_column_indices = self._get_targets(self._outputs, self.hyperparams)
+        self._input_column_names = self._training_inputs.columns.astype(str)
+
+        if len(self._training_indices) > 0 and len(self._target_column_indices) > 0:
+            self._target_columns_metadata = self._get_target_columns_metadata(self._training_outputs.metadata, self.hyperparams)
+            sk_training_output = self._training_outputs.values
+
+            shape = sk_training_output.shape
+            if len(shape) == 2 and shape[1] == 1:
+                sk_training_output = numpy.ravel(sk_training_output)
+
+            self._clf.fit(self._training_inputs, sk_training_output)
+            self._fitted = True
+        else:
+            if self.hyperparams['error_on_no_input']:
+                raise RuntimeError("No input columns were selected")
+            self.logger.warn("No input columns were selected")
+
+        return CallResult(None)
+
+    def produce(self, *, inputs: Inputs, timeout: float = None, iterations: int = None) -> CallResult[Outputs]:
+        sk_inputs, columns_to_use = self._get_columns_to_fit(inputs, self.hyperparams)
+        output = []
+        if len(sk_inputs.columns):
+            try:
+                sk_output = self._clf.predict(sk_inputs)
+            except sklearn.exceptions.NotFittedError as error:
+                raise PrimitiveNotFittedError("Primitive not fitted.") from error
+            # For primitives that allow predicting without fitting like GaussianProcessRegressor
+            if not self._fitted:
+                raise PrimitiveNotFittedError("Primitive not fitted.")
+            if sparse.issparse(sk_output):
+                sk_output = pandas.DataFrame.sparse.from_spmatrix(sk_output)
+            output = self._wrap_predictions(inputs, sk_output)
+            output.columns = self._target_names
+            output = [output]
+        else:
+            if self.hyperparams['error_on_no_input']:
+                raise RuntimeError("No input columns were selected")
+            self.logger.warn("No input columns were selected")
+        outputs = base_utils.combine_columns(return_result=self.hyperparams['return_result'],
+                                               add_index_columns=self.hyperparams['add_index_columns'],
+                                               inputs=inputs, column_indices=self._target_column_indices,
+                                               columns_list=output)
+        return CallResult(outputs)
+
+    @classmethod
+    def _get_columns_to_fit(cls, inputs: Inputs, hyperparams: Hyperparams):
+        if not hyperparams['use_semantic_types']:
+            return inputs, list(range(len(inputs.columns)))
+
+        inputs_metadata = inputs.metadata
+
+        def can_produce_column(column_index: int) -> bool:
+            return cls._can_produce_column(inputs_metadata, column_index, hyperparams)
+
+        columns_to_produce, columns_not_to_produce = base_utils.get_columns_to_use(inputs_metadata,
+                                                                             use_columns=hyperparams['use_inputs_columns'],
+                                                                             exclude_columns=hyperparams['exclude_inputs_columns'],
+                                                                             can_use_column=can_produce_column)
+        return inputs.iloc[:, columns_to_produce], columns_to_produce
+        # return columns_to_produce
+
+    @classmethod
+    def _can_produce_column(cls, inputs_metadata: metadata_base.DataMetadata, column_index: int, hyperparams: Hyperparams) -> bool:
+        column_metadata = inputs_metadata.query((metadata_base.ALL_ELEMENTS, column_index))
+
+        accepted_structural_types = (int, float, numpy.integer, numpy.float64)
+        accepted_semantic_types = set()
+        accepted_semantic_types.add("https://metadata.datadrivendiscovery.org/types/Attribute")
+        if not issubclass(column_metadata['structural_type'], accepted_structural_types):
+            return False
+
+        semantic_types = set(column_metadata.get('semantic_types', []))
+
+        if len(semantic_types) == 0:
+            cls.logger.warning("No semantic types found in column metadata")
+            return False
+        # Making sure all accepted_semantic_types are available in semantic_types
+        if len(accepted_semantic_types - semantic_types) == 0:
+            return True
+
+        return False
+
+    @classmethod
+    def _get_targets(cls, data: d3m_dataframe, hyperparams: Hyperparams):
+        if not hyperparams['use_semantic_types']:
+            return data, list(data.columns), list(range(len(data.columns)))
+
+        metadata = data.metadata
+
+        def can_produce_column(column_index: int) -> bool:
+            accepted_semantic_types = set()
+            accepted_semantic_types.add("https://metadata.datadrivendiscovery.org/types/TrueTarget")
+            column_metadata = metadata.query((metadata_base.ALL_ELEMENTS, column_index))
+            semantic_types = set(column_metadata.get('semantic_types', []))
+            if len(semantic_types) == 0:
+                cls.logger.warning("No semantic types found in column metadata")
+                return False
+            # Making sure all accepted_semantic_types are available in semantic_types
+            if len(accepted_semantic_types - semantic_types) == 0:
+                return True
+            return False
+
+        target_column_indices, target_columns_not_to_produce = base_utils.get_columns_to_use(metadata,
+                                                                                               use_columns=hyperparams[
+                                                                                                   'use_outputs_columns'],
+                                                                                               exclude_columns=
+                                                                                               hyperparams[
+                                                                                                   'exclude_outputs_columns'],
+                                                                                               can_use_column=can_produce_column)
+        targets = []
+        if target_column_indices:
+            targets = data.select_columns(target_column_indices)
+        target_column_names = []
+        for idx in target_column_indices:
+            target_column_names.append(data.columns[idx])
+        return targets, target_column_names, target_column_indices
+
+    @classmethod
+    def _get_target_columns_metadata(cls, outputs_metadata: metadata_base.DataMetadata, hyperparams) -> List[OrderedDict]:
+        outputs_length = outputs_metadata.query((metadata_base.ALL_ELEMENTS,))['dimension']['length']
+
+        target_columns_metadata: List[OrderedDict] = []
+        for column_index in range(outputs_length):
+            column_metadata = OrderedDict(outputs_metadata.query_column(column_index))
+
+            # Update semantic types and prepare it for predicted targets.
+            semantic_types = set(column_metadata.get('semantic_types', []))
+            semantic_types_to_remove = set(["https://metadata.datadrivendiscovery.org/types/TrueTarget","https://metadata.datadrivendiscovery.org/types/SuggestedTarget",])
+            add_semantic_types = set(["https://metadata.datadrivendiscovery.org/types/PredictedTarget",])
+            add_semantic_types.add(hyperparams["return_semantic_type"])
+            semantic_types = semantic_types - semantic_types_to_remove
+            semantic_types = semantic_types.union(add_semantic_types)
+            column_metadata['semantic_types'] = list(semantic_types)
+
+            target_columns_metadata.append(column_metadata)
+
+        return target_columns_metadata
+
+    @classmethod
+    def _update_predictions_metadata(cls, inputs_metadata: metadata_base.DataMetadata, outputs: Optional[Outputs],
+                                     target_columns_metadata: List[OrderedDict]) -> metadata_base.DataMetadata:
+        outputs_metadata = metadata_base.DataMetadata().generate(value=outputs)
+
+        for column_index, column_metadata in enumerate(target_columns_metadata):
+            column_metadata.pop("structural_type", None)
+            outputs_metadata = outputs_metadata.update_column(column_index, column_metadata)
+
+        return outputs_metadata
+
+    def _wrap_predictions(self, inputs: Inputs, predictions: ndarray) -> Outputs:
+        outputs = d3m_dataframe(predictions, generate_metadata=False)
+        outputs.metadata = self._update_predictions_metadata(inputs.metadata, outputs, self._target_columns_metadata)
+        return outputs
+
+
+    @classmethod
+    def _add_target_columns_metadata(cls, outputs_metadata: metadata_base.DataMetadata):
+        outputs_length = outputs_metadata.query((metadata_base.ALL_ELEMENTS,))['dimension']['length']
+
+        target_columns_metadata: List[OrderedDict] = []
+        for column_index in range(outputs_length):
+            column_metadata = OrderedDict()
+            semantic_types = []
+            semantic_types.append('https://metadata.datadrivendiscovery.org/types/PredictedTarget')
+            column_name = outputs_metadata.query((metadata_base.ALL_ELEMENTS, column_index)).get("name")
+            if column_name is None:
+                column_name = "output_{}".format(column_index)
+            column_metadata["semantic_types"] = semantic_types
+            column_metadata["name"] = str(column_name)
+            target_columns_metadata.append(column_metadata)
+
+        return target_columns_metadata
+
+{% endblock %}

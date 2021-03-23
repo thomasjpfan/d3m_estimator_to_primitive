@@ -1,0 +1,197 @@
+from typing import Any, Callable, List, Dict, Union, Optional, Sequence, Tuple
+from numpy import ndarray
+from collections import OrderedDict
+from scipy import sparse
+import os
+import sklearn
+import numpy
+import typing
+import pandas
+
+{% for import in custom_imports %}
+{{ import }}
+{% endfor %}
+
+from d3m.container.numpy import ndarray as d3m_ndarray
+from d3m.container import DataFrame as d3m_dataframe
+from d3m.metadata import hyperparams, params, base as metadata_base
+from d3m import utils
+from d3m.base import utils as base_utils
+from d3m.exceptions import PrimitiveNotFittedError
+from d3m.primitive_interfaces.base import CallResult, DockerContainer
+
+from d3m.primitive_interfaces.supervised_learning import SupervisedLearnerPrimitiveBase
+from d3m.primitive_interfaces.base import ProbabilisticCompositionalityMixin, ContinueFitMixin
+from d3m import exceptions
+
+
+Inputs = d3m_dataframe
+Outputs = d3m_dataframe
+
+class Params(params.Params):
+{% for name, key in params.items() %}
+    {{ name }} : Optional[{{ key }}]
+{% endfor %}
+    input_column_names: Optional[pandas.core.indexes.base.Index]
+    target_names_: Optional[Sequence[Any]]
+    training_indices_: Optional[Sequence[int]]
+    target_column_indices_: Optional[Sequence[int]]
+    target_columns_metadata_: Optional[List[OrderedDict]]
+
+
+class Hyperparams(hyperparams.Hyperparams):
+{% for name, value in hyperparams.items() %}
+    {{ name }} = {{ value }}
+{% endfor %}
+    use_inputs_columns = hyperparams.Set(
+        elements=hyperparams.Hyperparameter[int](-1),
+        default=(),
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("A set of column indices to force primitive to use as training input."
+        " If any specified column cannot be parsed, it is skipped."),
+    )
+    use_outputs_columns = hyperparams.Set(
+        elements=hyperparams.Hyperparameter[int](-1),
+        default=(),
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("A set of column indices to force primitive to use as training target."
+        " If any specified column cannot be parsed, it is skipped."),
+    )
+    exclude_inputs_columns = hyperparams.Set(
+        elements=hyperparams.Hyperparameter[int](-1),
+        default=(),
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("A set of column indices to not use as training inputs. "
+        "Applicable only if \"use_columns\" is not provided."),
+    )
+    exclude_outputs_columns = hyperparams.Set(
+        elements=hyperparams.Hyperparameter[int](-1),
+        default=(),
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("A set of column indices to not use as training target. "
+        "Applicable only if \"use_columns\" is not provided."),
+    )
+    return_result = hyperparams.Enumeration(
+        values=['append', 'replace', 'new'],
+        default='new',
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("Should parsed columns be appended, should they replace original columns, "
+        "or should only parsed columns be returned? This hyperparam is ignored if "
+        "use_semantic_types is set to false."),
+    )
+    use_semantic_types = hyperparams.UniformBool(
+        default=False,
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("Controls whether semantic_types metadata will be used for filtering "
+        "columns in input dataframe. Setting this to false makes the code ignore "
+        "return_result and will produce only the output dataframe")
+    )
+    add_index_columns = hyperparams.UniformBool(
+        default=False,
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("Also include primary index columns if input data has them. "
+        "Applicable only if \"return_result\" is set to \"new\"."),
+    )
+    error_on_no_input = hyperparams.UniformBool(
+        default=True,
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        description=("Throw an exception if no input column is selected/provided. "
+        "Defaults to true to behave like sklearn. To prevent pipelines from "
+        "breaking set this to False."),
+    )
+
+    return_semantic_type = hyperparams.Enumeration[str](
+        values=['https://metadata.datadrivendiscovery.org/types/Attribute', 'https://metadata.datadrivendiscovery.org/types/ConstructedAttribute', 'https://metadata.datadrivendiscovery.org/types/PredictedTarget'],
+        default='https://metadata.datadrivendiscovery.org/types/PredictedTarget',
+        description='Decides what semantic type to attach to generated output',
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter']
+    )
+
+
+class {{ estimator_name }}({% block class_inherit %}{% endblock %}):
+    """
+    Primitive wrapping for {{ class_name_complete }}
+    """
+
+    __author__ = "{{ author }}"
+    metadata = metadata_base.PrimitiveMetadata({
+        "name": "{{ class_name_complete }}",
+        "algorithm_types": {{ algorithm_types }},
+        "python_path": "{{ d3m_python_path }}",
+        "version": "{{ version }}",
+        "id": "{{ id }}",
+        {% if "hyperparams_to_tune" in metadata %}
+        "hyperparams_to_tune": {{ hyperparams_to_tune }}
+        {% endif %}
+        "primitive_family": {{ primitive_family }},
+    })
+
+    def __init__(self, *,
+                 hyperparams: Hyperparams,
+                 random_seed: int = 0,
+                 docker_containers: Dict[str, DockerContainer] = None) -> None:
+
+        super().__init__(hyperparams=hyperparams, random_seed=random_seed, docker_containers=docker_containers)
+
+        self._clf = {{ class_name_single }}(
+            {% for name in hyperparams %}
+            {{ name }}=self.hyperparams["{{ name }}"],
+            {% endfor %}
+            {% if has_random_state %}
+            random_state = self.random_seed,
+            {% endif %}
+        )
+        self._inputs = None
+        self._outputs = None
+        self._training_inputs = None
+        self._training_outputs = None
+        self._target_names = None
+        self._training_indices = None
+        self._target_column_indices = None
+        self._target_columns_metadata: List[OrderedDict] = None
+        self._input_column_names = None
+        self._fitted = False
+        self._new_training_data = False
+
+    def get_params(self) -> Params:
+        if not self._fitted:
+            return Params(
+                {% for param in params %}
+                {{ param }}=None,
+                {% endfor %}
+                input_column_names=self._input_column_names,
+                training_indices_=self._training_indices,
+                target_names_=self._target_names,
+                target_column_indices_=self._target_column_indices,
+                target_columns_metadata_=self._target_columns_metadata
+            )
+
+        return Params(
+            {% for param in params %}
+            {{ param }}=getattr(self._clf, '{{ param }}', None),
+            {% endfor %}
+            input_column_names=self._input_column_names,
+            training_indices_=self._training_indices,
+            target_names_=self._target_names,
+            target_column_indices_=self._target_column_indices,
+            target_columns_metadata_=self._target_columns_metadata
+        )
+
+    def set_params(self, *, params: Params) -> None:
+        {% for param in params %}
+        self._clf.{{ param }} = params["{{ param }}"]
+        {% endfor %}
+        self._input_column_names = params['input_column_names']
+        self._training_indices = params['training_indices_']
+        self._target_names = params['target_names_']
+        self._target_column_indices = params['target_column_indices_']
+        self._target_columns_metadata = params['target_columns_metadata_']
+
+        {% for param in params %}
+        if params["{{ param }}"] is not None:
+            self._fitted = True
+        {% endfor %}
+
+{% block class_body %}{% endblock %}
+
+{{ estimator_name }}.__doc__ = {{ class_name_single }}

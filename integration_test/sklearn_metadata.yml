@@ -1,0 +1,31 @@
+package_name: sklearn_wrap
+author: Thomas J. Fan
+version: 2021.3.0
+estimators:
+  SKRidge:
+    class_name: sklearn.linear_model.Ridge
+    d3m_python_path: d3m.primitives.regression.ridge.SKlearn
+    algorithm_types: [TIKHONOV_REGULARIZATION]
+    hyperparams_to_tune: [alpha, max_iter]
+    parameters:
+      alpha:
+        type: float
+        lower: 0
+      fit_intercept:
+        type: bool
+      normalize:
+        type: bool
+      max_iter:
+        type: union
+        choices:
+          - type: int
+            lower: 0
+            default: 1000
+          - type: None
+        default_type: None
+      solver:
+        type: enum
+        choices: [auto, svd, cholesky, lsqr, sparse_cg, sag, saga]
+      tol:
+        type: float
+        lower: 0

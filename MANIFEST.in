@@ -1,0 +1,3 @@
+recursive-include d3m_estimator_to_primitive *.jinja2
+recursive-include d3m_estimator_to_primitive *.csv
+recursive-include d3m_estimator_to_primitive *.json
