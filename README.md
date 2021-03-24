@@ -46,7 +46,7 @@ xgboost_wrap
 The `test-data` and `vendor` directory are used for running in the `tests` directory. To run the tests:
 
 ```bash
-python xgboost_wrap/tests/test_D3M_XGBClassifier.py
+PYTHONPATH=$PWD python xgboost_wrap/tests/test_D3M_XGBClassifier.py
 ```
 
 ## License
