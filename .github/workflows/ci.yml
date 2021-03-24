@@ -20,10 +20,10 @@ jobs:
       - name: Run integration tests for sklearn
         run: |
           estimator_to_primitive integration_test/sklearn_metadata.yml
-          PYTHONPATH=$PWD python sklearn_wrap/tests/*.py
+          pytest sklearn_wrap/tests
 
       - name: Run integration tests for xgboost
         run: |
           pip install xgboost
           estimator_to_primitive integration_test/xgboost_metadata.yml
-          PYTHONPATH=$PWD python xgboost_wrap/tests/*.py
+          pytest xgboost_wrap/tests
