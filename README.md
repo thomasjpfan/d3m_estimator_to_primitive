@@ -13,7 +13,12 @@ Converts sklearn compatible estimators into D3M primitives
 pip install git+https://github.com/thomasjpfan/d3m_estimator_to_primitive
 ```
 
-2. Install library that contains sklearn compatible estimator. For example, if you want to wrap `xgboost.XGBClassifier`, install `xgboost`.
+2. Install library that contains sklearn compatible estimator. For example, if you want to wrap `xgboost.XGBClassifier`, install `xgboost`:
+
+```bash
+pip install xgboost
+```
+
 3. Create a `metadata.yml` for estimators you want to convert. See the `integration_test` folder for examples.
 4. Run the conversion script:
 
